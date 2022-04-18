@@ -22,3 +22,5 @@ COCO/
 ```
 
 You can use the 2014 version of the dataset as well.
+
+yolox는 VOC와 COCO형태의 데이터셋으로만 학습을 지원하기 때문

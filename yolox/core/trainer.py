@@ -12,22 +12,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
 from yolox.data import DataPrefetcher
-from yolox.utils import (
-    MeterBuffer,
-    ModelEMA,
-    all_reduce_norm,
-    get_local_rank,
-    get_model_info,
-    get_rank,
-    get_world_size,
-    gpu_mem_usage,
-    is_parallel,
-    load_ckpt,
-    occupy_mem,
-    save_checkpoint,
-    setup_logger,
-    synchronize
-)
+from yolox.utils import (MeterBuffer, ModelEMA, all_reduce_norm, get_local_rank, get_model_info, get_rank, get_world_size, gpu_mem_usage, is_parallel, load_ckpt, occupy_mem, save_checkpoint, setup_logger, synchronize)
 
 
 class Trainer:
@@ -59,12 +44,7 @@ class Trainer:
         if self.rank == 0:
             os.makedirs(self.file_name, exist_ok=True)
 
-        setup_logger(
-            self.file_name,
-            distributed_rank=self.rank,
-            filename="train_log.txt",
-            mode="a",
-        )
+        setup_logger(self.file_name, distributed_rank=self.rank, filename="train_log.txt", mode="a", )
 
     def train(self):
         self.before_train()
@@ -115,12 +95,7 @@ class Trainer:
             param_group["lr"] = lr
 
         iter_end_time = time.time()
-        self.meter.update(
-            iter_time=iter_end_time - iter_start_time,
-            data_time=data_end_time - iter_start_time,
-            lr=lr,
-            **outputs,
-        )
+        self.meter.update(iter_time=iter_end_time - iter_start_time, data_time=data_end_time - iter_start_time, lr=lr, **outputs, )
 
     def before_train(self):
         logger.info("args: {}".format(self.args))
@@ -129,9 +104,7 @@ class Trainer:
         # model related init
         torch.cuda.set_device(self.local_rank)
         model = self.exp.get_model()
-        logger.info(
-            "Model Summary: {}".format(get_model_info(model, self.exp.test_size))
-        )
+        logger.info("Model Summary: {}".format(get_model_info(model, self.exp.test_size)))
         model.to(self.device)
 
         # solver related init
@@ -141,21 +114,14 @@ class Trainer:
         model = self.resume_train(model)
 
         # data related init
-        self.no_aug = self.start_epoch >= self.max_epoch - self.exp.no_aug_epochs
-        self.train_loader = self.exp.get_data_loader(
-            batch_size=self.args.batch_size,
-            is_distributed=self.is_distributed,
-            no_aug=self.no_aug,
-            cache_img=self.args.cache,
-        )
+        self.no_aug = self.start_epoch >= self.max_epoch - self.exp.no_aug_epochs       # 초반에는 aug으로 하고, no_aug_epochs 이후에는  no_aug으로 한다.
+        self.train_loader = self.exp.get_data_loader(batch_size=self.args.batch_size, is_distributed=self.is_distributed, no_aug=self.no_aug, cache_img=self.args.cache, )
         logger.info("init prefetcher, this might take one minute or less...")
         self.prefetcher = DataPrefetcher(self.train_loader)
         # max_iter means iters per epoch
         self.max_iter = len(self.train_loader)
 
-        self.lr_scheduler = self.exp.get_lr_scheduler(
-            self.exp.basic_lr_per_img * self.args.batch_size, self.max_iter
-        )
+        self.lr_scheduler = self.exp.get_lr_scheduler(self.exp.basic_lr_per_img * self.args.batch_size, self.max_iter)
         if self.args.occupy:
             occupy_mem(self.local_rank)
 
@@ -169,9 +135,7 @@ class Trainer:
         self.model = model
         self.model.train()
 
-        self.evaluator = self.exp.get_evaluator(
-            batch_size=self.args.batch_size, is_distributed=self.is_distributed
-        )
+        self.evaluator = self.exp.get_evaluator(batch_size=self.args.batch_size, is_distributed=self.is_distributed)
         # Tensorboard logger
         if self.rank == 0:
             self.tblogger = SummaryWriter(self.file_name)
@@ -180,9 +144,7 @@ class Trainer:
         logger.info("\n{}".format(model))
 
     def after_train(self):
-        logger.info(
-            "Training of experiment is done and the best AP is {:.2f}".format(self.best_ap * 100)
-        )
+        logger.info("Training of experiment is done and the best AP is {:.2f}".format(self.best_ap * 100))
 
     def before_epoch(self):
         logger.info("---> start train epoch{}".format(self.epoch + 1))
@@ -222,36 +184,19 @@ class Trainer:
             eta_seconds = self.meter["iter_time"].global_avg * left_iters
             eta_str = "ETA: {}".format(datetime.timedelta(seconds=int(eta_seconds)))
 
-            progress_str = "epoch: {}/{}, iter: {}/{}".format(
-                self.epoch + 1, self.max_epoch, self.iter + 1, self.max_iter
-            )
+            progress_str = "epoch: {}/{}, iter: {}/{}".format(self.epoch + 1, self.max_epoch, self.iter + 1, self.max_iter)
             loss_meter = self.meter.get_filtered_meter("loss")
-            loss_str = ", ".join(
-                ["{}: {:.1f}".format(k, v.latest) for k, v in loss_meter.items()]
-            )
+            loss_str = ", ".join(["{}: {:.1f}".format(k, v.latest) for k, v in loss_meter.items()])
 
             time_meter = self.meter.get_filtered_meter("time")
-            time_str = ", ".join(
-                ["{}: {:.3f}s".format(k, v.avg) for k, v in time_meter.items()]
-            )
+            time_str = ", ".join(["{}: {:.3f}s".format(k, v.avg) for k, v in time_meter.items()])
 
-            logger.info(
-                "{}, mem: {:.0f}Mb, {}, {}, lr: {:.3e}".format(
-                    progress_str,
-                    gpu_mem_usage(),
-                    time_str,
-                    loss_str,
-                    self.meter["lr"].latest,
-                )
-                + (", size: {:d}, {}".format(self.input_size[0], eta_str))
-            )
+            logger.info("{}, mem: {:.0f}Mb, {}, {}, lr: {:.3e}".format(progress_str, gpu_mem_usage(), time_str, loss_str, self.meter["lr"].latest, ) + (", size: {:d}, {}".format(self.input_size[0], eta_str)))
             self.meter.clear_meters()
 
         # random resizing
         if (self.progress_in_iter + 1) % 10 == 0:
-            self.input_size = self.exp.random_resize(
-                self.train_loader, self.epoch, self.rank, self.is_distributed
-            )
+            self.input_size = self.exp.random_resize(self.train_loader, self.epoch, self.rank, self.is_distributed)
 
     @property
     def progress_in_iter(self):
@@ -270,17 +215,9 @@ class Trainer:
             model.load_state_dict(ckpt["model"])
             self.optimizer.load_state_dict(ckpt["optimizer"])
             # resume the training states variables
-            start_epoch = (
-                self.args.start_epoch - 1
-                if self.args.start_epoch is not None
-                else ckpt["start_epoch"]
-            )
+            start_epoch = (self.args.start_epoch - 1 if self.args.start_epoch is not None else ckpt["start_epoch"])
             self.start_epoch = start_epoch
-            logger.info(
-                "loaded checkpoint '{}' (epoch {})".format(
-                    self.args.resume, self.start_epoch
-                )
-            )  # noqa
+            logger.info("loaded checkpoint '{}' (epoch {})".format(self.args.resume, self.start_epoch))  # noqa
         else:
             if self.args.ckpt is not None:
                 logger.info("loading checkpoint for fine tuning")
@@ -299,9 +236,7 @@ class Trainer:
             if is_parallel(evalmodel):
                 evalmodel = evalmodel.module
 
-        ap50_95, ap50, summary = self.exp.eval(
-            evalmodel, self.evaluator, self.is_distributed
-        )
+        ap50_95, ap50, summary = self.exp.eval(evalmodel, self.evaluator, self.is_distributed)
         self.model.train()
         if self.rank == 0:
             self.tblogger.add_scalar("val/COCOAP50", ap50, self.epoch + 1)
@@ -316,14 +251,5 @@ class Trainer:
         if self.rank == 0:
             save_model = self.ema_model.ema if self.use_model_ema else self.model
             logger.info("Save weights to {}".format(self.file_name))
-            ckpt_state = {
-                "start_epoch": self.epoch + 1,
-                "model": save_model.state_dict(),
-                "optimizer": self.optimizer.state_dict(),
-            }
-            save_checkpoint(
-                ckpt_state,
-                update_best_ckpt,
-                self.file_name,
-                ckpt_name,
-            )
+            ckpt_state = {"start_epoch": self.epoch + 1, "model": save_model.state_dict(), "optimizer": self.optimizer.state_dict(), }
+            save_checkpoint(ckpt_state, update_best_ckpt, self.file_name, ckpt_name, )

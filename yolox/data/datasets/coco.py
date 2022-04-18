@@ -18,15 +18,7 @@ class COCODataset(Dataset):
     COCO dataset class.
     """
 
-    def __init__(
-        self,
-        data_dir=None,
-        json_file="instances_train2017.json",
-        name="train2017",
-        img_size=(416, 416),
-        preproc=None,
-        cache=False,
-    ):
+    def __init__(self, data_dir=None, json_file="instances_train2017.json", name="train2017", img_size=(416, 416), preproc=None, cache=False, ):
         """
         COCO dataset initialization. Annotation data are read into memory by COCO API.
         Args:
@@ -48,10 +40,10 @@ class COCODataset(Dataset):
         cats = self.coco.loadCats(self.coco.getCatIds())
         self._classes = tuple([c["name"] for c in cats])
         self.imgs = None
-        self.name = name
-        self.img_size = img_size
+        self.name = name  # -> 'train2017'
+        self.img_size = img_size  # -> (640,640)
         self.preproc = preproc
-        self.annotations = self._load_coco_annotations()
+        self.list_np_bbox_coord_imagehw_resizedhw_filename = self._load_coco_annotations()
         if cache:
             self._cache_images()
 
@@ -65,55 +57,38 @@ class COCODataset(Dataset):
         return [self.load_anno_from_ids(_ids) for _ids in self.ids]
 
     def _cache_images(self):
-        logger.warning(
-            "\n********************************************************************************\n"
-            "You are using cached images in RAM to accelerate training.\n"
-            "This requires large system RAM.\n"
-            "Make sure you have 200G+ RAM and 136G available disk space for training COCO.\n"
-            "********************************************************************************\n"
-        )
+        logger.warning("\n********************************************************************************\n"
+                       "You are using cached images in RAM to accelerate training.\n"
+                       "This requires large system RAM.\n"
+                       "Make sure you have 200G+ RAM and 136G available disk space for training COCO.\n"
+                       "********************************************************************************\n")
         max_h = self.img_size[0]
         max_w = self.img_size[1]
         cache_file = self.data_dir + "/img_resized_cache_" + self.name + ".array"
         if not os.path.exists(cache_file):
-            logger.info(
-                "Caching images for the first time. This might take about 20 minutes for COCO"
-            )
-            self.imgs = np.memmap(
-                cache_file,
-                shape=(len(self.ids), max_h, max_w, 3),
-                dtype=np.uint8,
-                mode="w+",
-            )
+            logger.info("Caching images for the first time. This might take about 20 minutes for COCO")
+            self.imgs = np.memmap(cache_file, shape=(len(self.ids), max_h, max_w, 3), dtype=np.uint8, mode="w+", )
             from tqdm import tqdm
             from multiprocessing.pool import ThreadPool
 
             NUM_THREADs = min(8, os.cpu_count())
-            loaded_images = ThreadPool(NUM_THREADs).imap(
-                lambda x: self.load_resized_img(x),
-                range(len(self.annotations)),
-            )
-            pbar = tqdm(enumerate(loaded_images), total=len(self.annotations))
+            loaded_images = ThreadPool(NUM_THREADs).imap(lambda x: self.load_resized_img(x), range(len(self.list_np_bbox_coord_imagehw_resizedhw_filename)), )
+            pbar = tqdm(enumerate(loaded_images), total=len(self.list_np_bbox_coord_imagehw_resizedhw_filename))
             for k, out in pbar:
                 self.imgs[k][: out.shape[0], : out.shape[1], :] = out.copy()
             self.imgs.flush()
             pbar.close()
         else:
-            logger.warning(
-                "You are using cached imgs! Make sure your dataset is not changed!!\n"
-                "Everytime the self.input_size is changed in your exp file, you need to delete\n"
-                "the cached data and re-generate them.\n"
-            )
+            logger.warning("You are using cached imgs! Make sure your dataset is not changed!!\n"
+                           "Everytime the self.input_size is changed in your exp file, you need to delete\n"
+                           "the cached data and re-generate them.\n")
 
         logger.info("Loading cached imgs...")
-        self.imgs = np.memmap(
-            cache_file,
-            shape=(len(self.ids), max_h, max_w, 3),
-            dtype=np.uint8,
-            mode="r+",
-        )
+        self.imgs = np.memmap(cache_file, shape=(len(self.ids), max_h, max_w, 3), dtype=np.uint8, mode="r+", )
 
     def load_anno_from_ids(self, id_):
+        #  주어진 이미지ID에 대해,  res[bbox 좌표 4개, self.class_ids에서의 cls index] , image_hw, resized_hw, filename 을 계산 .
+
         im_ann = self.coco.loadImgs(id_)[0]
         width = im_ann["width"]
         height = im_ann["height"]
@@ -144,29 +119,21 @@ class COCODataset(Dataset):
         img_info = (height, width)
         resized_info = (int(height * r), int(width * r))
 
-        file_name = (
-            im_ann["file_name"]
-            if "file_name" in im_ann
-            else "{:012}".format(id_) + ".jpg"
-        )
+        file_name = (im_ann["file_name"] if "file_name" in im_ann else "{:012}".format(id_) + ".jpg")
 
         return (res, img_info, resized_info, file_name)
 
     def load_anno(self, index):
-        return self.annotations[index][0]
+        return self.list_np_bbox_coord_imagehw_resizedhw_filename[index][0]
 
     def load_resized_img(self, index):
         img = self.load_image(index)
         r = min(self.img_size[0] / img.shape[0], self.img_size[1] / img.shape[1])
-        resized_img = cv2.resize(
-            img,
-            (int(img.shape[1] * r), int(img.shape[0] * r)),
-            interpolation=cv2.INTER_LINEAR,
-        ).astype(np.uint8)
+        resized_img = cv2.resize(img, (int(img.shape[1] * r), int(img.shape[0] * r)), interpolation=cv2.INTER_LINEAR, ).astype(np.uint8)
         return resized_img
 
     def load_image(self, index):
-        file_name = self.annotations[index][3]
+        file_name = self.list_np_bbox_coord_imagehw_resizedhw_filename[index][3]
 
         img_file = os.path.join(self.data_dir, self.name, file_name)
 
@@ -178,7 +145,7 @@ class COCODataset(Dataset):
     def pull_item(self, index):
         id_ = self.ids[index]
 
-        res, img_info, resized_info, _ = self.annotations[index]
+        res, img_info, resized_info, _ = self.list_np_bbox_coord_imagehw_resizedhw_filename[index]
         if self.imgs is not None:
             pad_img = self.imgs[index]
             img = pad_img[: resized_info[0], : resized_info[1], :].copy()
